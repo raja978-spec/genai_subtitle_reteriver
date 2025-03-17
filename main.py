@@ -1,58 +1,74 @@
-from langchain_community.document_loaders import DirectoryLoader, TextLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_chroma import Chroma
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain.output_parsers import StructuredOutputParser
-import pandas as pd
-import sqlite3
-import zipfile
-import io
 
-con = sqlite3.connect('eng_subtitles_database.db')
+import streamlit as st
 
-df = pd.read_sql_query('SELECT * FROM zipfiles', con)
+st.set_page_config(page_title="AI Subtitle Retriever", page_icon="📚", layout="centered")
 
+st.title("🤖 AI Subtitle Retriever")
 
-def decode_method(binary_data):
-    with io.BytesIO(binary_data) as f:
-        with zipfile.ZipFile(f, 'r') as zip_file:
-            subtitle_content = zip_file.read(zip_file.namelist()[0])
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "load_new_data_to_model" not in st.session_state:
+    st.session_state.load_new_data_to_model = False
+if 'train_btn_name' not in st.session_state:
+     st.session_state.train_btn_name = "Train Model With New Data"
+if 'spinner_message' not in st.session_state:
+     st.session_state.spinner_message = "Retrieving..."
+
+def switch_model_train_mode():
+     if st.session_state.load_new_data_to_model == True:
+         st.session_state.load_new_data_to_model = False
+         st.session_state.train_btn_name = 'Train Model With New Data'
+     else:
+         st.session_state.load_new_data_to_model = True
+         st.session_state.train_btn_name = 'Train Model With Existing Data'
     
-    return subtitle_content.decode('latin-1')
+train_btn = st.button(st.session_state.train_btn_name, on_click=switch_model_train_mode)
 
-df['file_content'] = df['content'].apply(decode_method)
+for message in st.session_state.messages:
+    with st.chat_message(message['role']):
+        st.markdown(message['content'])
 
-print(df.head()['file_content'][0])
 
-# import os
-# print(os.path.exists('dataset'))
-# API_KEY = open('.genimi.txt').read().strip()
+def get_response_from_model(user_prompt, load_new_data_to_model_db):
+      from generate_data import generated_subtitle, no_of_knowledge_base_data, no_of_available_knowledge_base_data
+      start_range = len(no_of_available_knowledge_base_data)+1
+      end_range = len(no_of_available_knowledge_base_data)+3
 
-# embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=API_KEY)
+      if start_range != no_of_knowledge_base_data[0] and load_new_data_to_model_db: 
+           generated_subtitle(start_range, end_range)
+           print('Inside.....', start_range, end_range)
+      from gemini_ai_subtitle_finder import subtitle_finder
+      ai_response = subtitle_finder(user_prompt,load_new_data_to_model_db)
+      return ai_response
 
-# docs = DirectoryLoader(path="dataset", glob="**/*.srt", loader_cls=TextLoader, show_progress=True)
-# docs = docs.load()
-# print(len(docs))
+print(st.session_state.load_new_data_to_model)
+user_prompt = st.chat_input('Enter a subtitle line to retrieve')
 
-# splitted_text = RecursiveCharacterTextSplitter(chunk_size=50, chunk_overlap=10)
-# chunks = splitted_text.split_documents(docs)
+if user_prompt:
+        with st.chat_message('user'):
+            st.markdown(user_prompt)
+        st.session_state.messages.append({'role':'user','content':user_prompt})
 
-# db = Chroma(collection_name='subtitle_knowledge_base',
-#             embedding_function=embeddings,
-#             persist_directory='./chroma.db'
-#             )
-# batch_size = 100
-# for i in range(0, len(chunks), batch_size):
-#     batch = chunks[i:i + batch_size]
-#     db.add_documents(batch)
-#     print(f"✅ Processed batch {i // batch_size + 1}/{(len(chunks) // batch_size) + 1}")
+        is_load_new_data_to_model = st.session_state.load_new_data_to_model
+        
+        if(is_load_new_data_to_model):
+             st.session_state.spinner_message = 'Model Takes Time To Learn From Expanded Data Please Wait.'
+        
+        with st.spinner(st.session_state.spinner_message):
+             ai_response = get_response_from_model(user_prompt, is_load_new_data_to_model)
+             text_response = ''
+             for page,score in ai_response:
+                  print(page.page_content)
+                  text_response += page.page_content
 
-# while True:
-#     user_input=input('*User: ')
+        with st.chat_message('ai'):
+            st.markdown(text_response)
+        st.session_state.messages.append({'role':'ai','content':text_response})
 
-#     if user_input == 'q':
-#         break
 
-#     ai_response = db.similarity_search_with_relevance_scores(user_input, k=1)
+    
+    
+   
 
-#     print('\n\n *AI: '.join([doc.page_content for doc, _score in ai_response]))
+
